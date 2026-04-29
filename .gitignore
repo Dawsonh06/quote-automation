@@ -1,0 +1,9 @@
+.env
+*.env
+release.zip
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.log
+processed_email_ids.json
