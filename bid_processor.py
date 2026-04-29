@@ -9,7 +9,7 @@ from utils.email_ops import get_unprocessed_emails, get_attachments, get_email_r
 from utils.sharepoint import get_site_id, get_drive_id, upload_file, read_json_file, write_json_file, append_to_log
 from bid_registry import load_active_bids, find_bid_folder
 from classifier import classify_email
-from matcher import process_all_attachments
+from matcher import process_all_attachments, match_email_body
 from file_namer import generate_filename
 
 load_dotenv()
@@ -24,6 +24,13 @@ WATCH_FOLDER = os.getenv("WATCH_FOLDER")
 
 PROCESSED_IDS_PATH = "AI Shadow - Bids/processed_email_ids.json"
 LOG_PATH = "AI Shadow - Bids/processing_log.xlsx"
+
+def _clean_matched_bid(matched_bid):
+    """Strip any trailing '| Keywords: ...' the model accidentally included."""
+    if not matched_bid:
+        return None
+    return matched_bid.split("|")[0].strip() or None
+
 
 def main():
     print(f"\n{'='*50}")
@@ -86,23 +93,47 @@ def main():
 
             elif classification == "quote":
                 if not attachments:
-                    upload_file(token, drive_id, REVIEW_FOLDER,
-                               f"NO_ATTACHMENT_{email_id[:8]}.txt",
-                               f"Email with no attachment:\nSubject: {subject}\nFrom: {sender}".encode())
-                    log_row[9] = "No PDF attachments"
-                    print(f"  No attachments, noted in review folder")
+                    # No PDF — analyse the email body text directly
+                    print(f"  No PDF attachments — analysing email body...")
+                    body_result = match_email_body(subject, sender, body, active_bids)
+                    confidence  = body_result.get("confidence", "low")
+                    matched_bid = _clean_matched_bid(body_result.get("matched_bid"))
+                    vendor      = body_result.get("vendor", "Unknown Vendor")
+                    scope       = body_result.get("scope", "Unknown Scope")
+                    price       = body_result.get("total_price")
+
+                    safe_subject = "".join(c for c in subject if c.isalnum() or c in " -_()").strip()[:80]
+                    filename     = generate_filename(scope, vendor, price, f"{safe_subject}.txt")
+
+                    if confidence == "high" and matched_bid:
+                        folder_path = find_bid_folder(token, drive_id, BIDS_BASE, matched_bid)
+                        if not folder_path:
+                            print(f"  WARNING: No folder found for '{matched_bid}', sending to review")
+                            folder_path = REVIEW_FOLDER
+                    else:
+                        folder_path = REVIEW_FOLDER
+
+                    txt_content = f"Subject: {subject}\nFrom: {sender}\n\n{body}"
+                    upload_file(token, drive_id, folder_path, filename, txt_content.encode("utf-8"))
+                    print(f"  Body-only quote: {filename} -> {folder_path}  [{confidence}]")
+
+                    log_row = [subject, sender, classification, matched_bid or "",
+                               confidence, vendor, scope, str(price or ""), filename, folder_path]
+                    try:
+                        append_to_log(token, drive_id, LOG_PATH, log_row)
+                    except Exception as log_err:
+                        print(f"  WARNING: Could not write to log (file may be open): {log_err}")
                 else:
-                    from matcher import process_all_attachments
                     results = process_all_attachments(attachments, active_bids)
 
                     for result in results:
                         original_name = result["original_filename"]
-                        is_quote = result.get("is_quote", True)
-                        confidence = result.get("confidence", "low")
-                        matched_bid = result.get("matched_bid")
-                        vendor = result.get("vendor", "Unknown Vendor")
-                        scope = result.get("scope", "Unknown Scope")
-                        price = result.get("total_price")
+                        is_quote      = result.get("is_quote", True)
+                        confidence    = result.get("confidence", "low")
+                        matched_bid   = _clean_matched_bid(result.get("matched_bid"))
+                        vendor        = result.get("vendor", "Unknown Vendor")
+                        scope         = result.get("scope", "Unknown Scope")
+                        price         = result.get("total_price")
 
                         if not is_quote:
                             # Supporting document — file alongside quote but don't rename
@@ -115,7 +146,7 @@ def main():
                             filename = f"SUPPORT - {vendor} - {original_name}"
                             print(f"    Supporting doc: {filename} -> {folder_path}")
                         else:
-                            # It's a quote — rename and match
+                            # It's a quote — rename and route
                             filename = generate_filename(scope, vendor, price, original_name)
                             if confidence == "high" and matched_bid:
                                 folder_path = find_bid_folder(token, drive_id, BIDS_BASE, matched_bid)
@@ -124,9 +155,8 @@ def main():
                                     folder_path = REVIEW_FOLDER
                             else:
                                 folder_path = REVIEW_FOLDER
-                            print(f"    Quote: {filename} -> {folder_path}")
+                            print(f"    Quote: {filename} -> {folder_path}  [{confidence}]")
 
-                        # Find the attachment bytes
                         att = next((a for a in attachments if a["name"] == original_name), None)
                         if att:
                             file_bytes = base64.b64decode(att["content_bytes"])

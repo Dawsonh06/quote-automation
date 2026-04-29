@@ -76,6 +76,59 @@ Respond with JSON only, no other text."""
     return json.loads(text)
 
 
+def match_email_body(subject, sender, body, active_bids):
+    """Match a body-only quote email (no PDF attachment) to an active bid.
+
+    Uses the email subject, sender, and body text instead of a PDF document.
+    Returns the same structure as match_and_extract.
+    """
+    bid_summary = "\n".join([
+        f"- Job name: \"{b['job_name']}\" | Match keywords: {', '.join(b['keywords'])}"
+        for b in active_bids
+    ])
+
+    prompt = f"""You are helping a construction company process incoming subcontractor quotes.
+
+Active bids MJ Hughes is currently pursuing:
+{bid_summary}
+
+Analyze this email and return a JSON object with these fields:
+
+- matched_bid: The exact job name string (only the part in quotes) from the list above that this quote is for, or null if you can't determine it
+- confidence: "high" (email clearly references this project by name, owner, or unique identifier),
+              "medium" (likely match based on location/scope but not explicitly named),
+              "low" (can't confidently match to any active bid)
+- vendor: Company name submitting the quote
+- scope: 3-6 word description of what they are quoting (e.g. "Concrete pumping services")
+- total_price: Total dollar amount as a number if there is one clear lump sum, null otherwise
+- reasoning: One sentence explaining your match decision
+- is_quote: true if this email contains pricing or scope of work, false otherwise
+
+Email details:
+Subject: {subject}
+From: {sender}
+Body:
+{body[:3000]}
+
+Rules:
+- Only return "high" confidence if the email contains the project name, owner name, or a keyword that uniquely identifies one of the active bids
+- If no active bids match, return matched_bid as null and confidence as "low"
+
+Respond with JSON only, no other text."""
+
+    response = client.messages.create(
+        model="claude-sonnet-4-6",
+        max_tokens=500,
+        messages=[{"role": "user", "content": prompt}]
+    )
+
+    text = response.content[0].text.strip()
+    if text.startswith("```"):
+        text = re.sub(r"^```[a-z]*\n?", "", text)
+        text = re.sub(r"\n?```$", "", text).strip()
+    return json.loads(text)
+
+
 def process_all_attachments(attachments, active_bids):
     """
     Processes every PDF attachment in an email individually.
