@@ -7,7 +7,8 @@ import base64
 from utils.graph_auth import get_access_token
 from utils.email_ops import get_unprocessed_emails, get_attachments, get_email_raw, mark_as_read, send_notification_email
 from utils.sharepoint import get_site_id, get_drive_id, upload_file, read_json_file, write_json_file, append_to_log
-from bid_registry import load_active_bids, find_bid_folder
+from bid_registry import load_active_bids, find_bid_folder, ensure_bid_folders_exist
+from bid_archiver import archive_expired_bids
 from classifier import classify_email
 from matcher import process_all_attachments, match_email_body
 from file_namer import generate_filename
@@ -21,6 +22,7 @@ ITB_BASE = os.getenv("SHAREPOINT_ITB_BASE")
 REVIEW_FOLDER = os.getenv("REVIEW_FOLDER")
 REGISTRY_PATH = os.getenv("BID_REGISTRY_PATH")
 WATCH_FOLDER = os.getenv("WATCH_FOLDER")
+BIDS_PAST_PATH = os.getenv("SHAREPOINT_BIDS_PAST")
 
 PROCESSED_IDS_PATH = "AI Shadow - Bids/processed_email_ids.json"
 LOG_PATH = "AI Shadow - Bids/processing_log.xlsx"
@@ -50,6 +52,13 @@ def main():
     if not active_bids:
         print("No active bids found in registry. Exiting.")
         return
+
+    print("\nEnsuring bid folders exist...")
+    ensure_bid_folders_exist(token, drive_id, BIDS_BASE, active_bids)
+
+    print("\nChecking for expired bids to archive...")
+    archive_expired_bids(token, drive_id, BIDS_BASE, BIDS_PAST_PATH)
+    print()
 
     # Get unprocessed emails
     emails = get_unprocessed_emails(token, MAILBOX, processed_ids, folder_name=WATCH_FOLDER)
@@ -105,7 +114,8 @@ def main():
                     safe_subject = "".join(c for c in subject if c.isalnum() or c in " -_()").strip()[:80]
                     filename     = generate_filename(scope, vendor, price, f"{safe_subject}.txt")
 
-                    if confidence == "high" and matched_bid:
+                    print(f"  Match: matched_bid={matched_bid!r}  confidence={confidence}")
+                    if confidence in ("high", "medium") and matched_bid:
                         folder_path = find_bid_folder(token, drive_id, BIDS_BASE, matched_bid)
                         if not folder_path:
                             print(f"  WARNING: No folder found for '{matched_bid}', sending to review")
@@ -135,9 +145,10 @@ def main():
                         scope         = result.get("scope", "Unknown Scope")
                         price         = result.get("total_price")
 
+                        print(f"    Match: matched_bid={matched_bid!r}  confidence={confidence}")
                         if not is_quote:
                             # Supporting document — file alongside quote but don't rename
-                            if confidence == "high" and matched_bid:
+                            if confidence in ("high", "medium") and matched_bid:
                                 folder_path = find_bid_folder(token, drive_id, BIDS_BASE, matched_bid)
                                 if not folder_path:
                                     folder_path = REVIEW_FOLDER
@@ -147,8 +158,13 @@ def main():
                             print(f"    Supporting doc: {filename} -> {folder_path}")
                         else:
                             # It's a quote — rename and route
-                            filename = generate_filename(scope, vendor, price, original_name)
-                            if confidence == "high" and matched_bid:
+                            filename = generate_filename(
+                                result.get("category_short"),
+                                vendor,
+                                price,
+                                original_name
+                            )
+                            if confidence in ("high", "medium") and matched_bid:
                                 folder_path = find_bid_folder(token, drive_id, BIDS_BASE, matched_bid)
                                 if not folder_path:
                                     print(f"    WARNING: No folder found for '{matched_bid}', sending to review")

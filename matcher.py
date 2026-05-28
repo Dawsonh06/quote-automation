@@ -9,10 +9,17 @@ load_dotenv()
 
 client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
 
+def load_categories():
+    import json, os
+    path = os.path.join(os.path.dirname(__file__), "config", "vendor_categories.json")
+    with open(path) as f:
+        return json.load(f)
+
+
 def match_and_extract(attachment, active_bids):
     """
     Takes a single PDF attachment and the active bid list.
-    Returns match result with bid, confidence, vendor, scope, price.
+    Returns match result with bid, confidence, vendor, category, price.
     """
     bid_summary = "\n".join([
         f"- Job name: \"{b['job_name']}\" | Match keywords: {', '.join(b['keywords'])}"
@@ -20,6 +27,9 @@ def match_and_extract(attachment, active_bids):
     ])
 
     pdf_data = attachment["content_bytes"]
+
+    categories = load_categories()
+    category_list = "\n".join([f"- {c['long']} → use code: {c['short']}" for c in categories])
 
     prompt = f"""You are helping a construction company process incoming subcontractor quotes.
 
@@ -33,16 +43,28 @@ Analyze the attached PDF and return a JSON object with these fields:
               "medium" (likely match based on location/scope but not explicitly named),
               "low" (can't confidently match to any active bid)
 - vendor: Company name submitting the quote
-- scope: 3-6 word description of what they are quoting (e.g. "Concrete pumping services", "Rebar supply and installation")
+- category_long: The full category name from this list that best describes what this vendor is quoting
+- category_short: The corresponding short code for that category
+- Both must come from this exact list — do not invent new categories:
+{category_list}
 - total_price: Total dollar amount as a number if there is one clear lump sum total, null if there are only unit prices, multiple alternates, or the total is unclear
 - reasoning: One sentence explaining your match decision
 - is_quote: true if this PDF contains pricing/scope of work, false if it is a supporting document (insurance cert, spec sheet, reference letter, etc.)
 
 Rules:
-- Only return "high" confidence if the document contains the project name, owner name, contract number, or a keyword that uniquely identifies one of the active bids
-- If total_price is ambiguous, return null - do not guess
-- If no active bids match, return matched_bid as null and confidence as "low"
-- Supporting documents (insurance certs, W9s, spec sheets) should have is_quote set to false
+- Construction quotes typically list the project name near the top of the document in formats like:
+  "Project: ________", "Re: ________", "Job: ________", "Project Name: ________",
+  "Attention: ________", or in a header/title block at the top of the page.
+  Always check these fields first before looking elsewhere in the document.
+- After finding the project name in the document, compare it against the active bid list
+  using both the project name AND the keywords. A match on either is sufficient.
+- Only return "high" confidence if the document contains the project name, owner name,
+  contract number, or a keyword that uniquely identifies one of the active bids.
+- If the project name on the document partially matches a bid (e.g. "Spanish Creek Bridge"
+  matching "Spanish Creek Box Girder Bridge"), treat that as high confidence.
+- If total_price is ambiguous, return null - do not guess.
+- If no active bids match, return matched_bid as null and confidence as "low".
+- Supporting documents (insurance certs, W9s, spec sheets) should have is_quote set to false.
 
 Respond with JSON only, no other text."""
 
@@ -149,7 +171,8 @@ def process_all_attachments(attachments, active_bids):
                 "matched_bid": None,
                 "confidence": "low",
                 "vendor": "Unknown",
-                "scope": "Unknown",
+                "category_long": "Unknown",
+                "category_short": "Unknown",
                 "total_price": None,
                 "is_quote": True,
                 "reasoning": f"Processing error: {str(e)}"
