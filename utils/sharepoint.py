@@ -103,8 +103,10 @@ def append_to_log(token, drive_id, log_path, row_data):
         wb = openpyxl.load_workbook(io.BytesIO(response.content))
         ws = wb.active
 
+    from zoneinfo import ZoneInfo
+    _pst = datetime.now(ZoneInfo("America/Los_Angeles")).strftime("%Y-%m-%d %H:%M PST")
     ws.insert_rows(2)
-    for col_idx, value in enumerate([datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")] + row_data, start=1):
+    for col_idx, value in enumerate([_pst] + row_data, start=1):
         ws.cell(row=2, column=col_idx, value=value)
 
     buffer = io.BytesIO()
