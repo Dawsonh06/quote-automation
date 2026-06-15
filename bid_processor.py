@@ -6,12 +6,13 @@ import base64
 
 from utils.graph_auth import get_access_token
 from utils.email_ops import get_unprocessed_emails, get_attachments, get_email_raw, mark_as_read, send_notification_email
-from utils.sharepoint import get_site_id, get_drive_id, upload_file, read_json_file, write_json_file, append_to_log
+from utils.sharepoint import get_site_id, get_drive_id, upload_file, read_json_file, write_json_file, append_to_log, ensure_folder_exists
 from bid_registry import load_active_bids, find_bid_folder, ensure_bid_folders_exist
 from bid_archiver import archive_expired_bids
 from classifier import classify_email
 from matcher import process_all_attachments, match_email_body
 from file_namer import generate_filename
+from vendor_database import upsert_vendor
 
 load_dotenv()
 
@@ -82,7 +83,7 @@ def main():
             classification = classification_result["classification"]
             print(f"  Classification: {classification} — {classification_result['reasoning']}")
 
-            log_row = [subject, sender, classification, "", "", "", "", "", "", ""]
+            log_row = [subject, sender, classification, "", "", "", "", "", "", "", ""]
 
             if classification == "itb":
                 all_attachments = get_attachments(token, MAILBOX, email_id, pdf_only=False)
@@ -112,7 +113,7 @@ def main():
                     price       = body_result.get("total_price")
 
                     safe_subject = "".join(c for c in subject if c.isalnum() or c in " -_()").strip()[:80]
-                    filename     = generate_filename(scope, vendor, price, f"{safe_subject}.txt")
+                    filename     = generate_filename(None, vendor, price, f"{safe_subject}.txt")
 
                     print(f"  Match: matched_bid={matched_bid!r}  confidence={confidence}")
                     if confidence in ("high", "medium") and matched_bid:
@@ -128,7 +129,7 @@ def main():
                     print(f"  Body-only quote: {filename} -> {folder_path}  [{confidence}]")
 
                     log_row = [subject, sender, classification, matched_bid or "",
-                               confidence, vendor, scope, str(price or ""), filename, folder_path]
+                               confidence, vendor, scope, str(price or ""), filename, folder_path, ""]
                     try:
                         append_to_log(token, drive_id, LOG_PATH, log_row)
                     except Exception as log_err:
@@ -174,13 +175,42 @@ def main():
                             print(f"    Quote: {filename} -> {folder_path}  [{confidence}]")
 
                         att = next((a for a in attachments if a["name"] == original_name), None)
-                        if att:
-                            file_bytes = base64.b64decode(att["content_bytes"])
-                            upload_file(token, drive_id, folder_path, filename, file_bytes)
+                        if not att:
+                            print(f"    WARNING: Could not find attachment bytes for '{original_name}' — skipping upload and log")
+                            continue
+
+                        file_bytes = base64.b64decode(att["content_bytes"])
+                        upload_file(token, drive_id, folder_path, filename, file_bytes)
+
+                        if is_quote:
+                            # File to 1010-BIDS BY TRADE as well
+                            category_short = result.get("category_short")
+                            if category_short and category_short != "Unknown":
+                                trade_folder = f"1010-BIDS BY TRADE/{category_short}"
+                                try:
+                                    ensure_folder_exists(token, drive_id, trade_folder)
+                                    upload_file(token, drive_id, trade_folder, filename, file_bytes)
+                                    print(f"    Also filed to trade folder: {trade_folder}")
+                                except Exception as e:
+                                    print(f"    WARNING: Could not file to trade folder: {e}")
+
+                            # Update vendor database
+                            try:
+                                upsert_vendor(token, drive_id, {
+                                    "company": result.get("vendor"),
+                                    "email": sender,
+                                    "phone": result.get("phone"),
+                                    "location": result.get("location"),
+                                    "category_short": category_short,
+                                    "bid_name": matched_bid or "",
+                                    "quote_date": datetime.today().strftime("%m/%d/%Y")
+                                })
+                            except Exception as e:
+                                print(f"    WARNING: Could not update vendor database: {e}")
 
                         log_row = [subject, sender, classification, matched_bid or "",
                                    confidence, vendor, scope, str(price or ""),
-                                   filename, folder_path]
+                                   filename, folder_path, ""]
                         try:
                             append_to_log(token, drive_id, LOG_PATH, log_row)
                         except Exception as log_err:
@@ -188,9 +218,10 @@ def main():
 
             else:
                 log_row[9] = "Skipped - not a quote or ITB"
+                log_row[10] = ""
                 print(f"  Skipped (classified as other)")
 
-            mark_as_read(token, MAILBOX, email_id)
+            # mark_as_read(token, MAILBOX, email_id)  # disabled — read-only inbox mode
 
             processed_ids[email_id] = {
                 "processed_at": datetime.utcnow().isoformat(),

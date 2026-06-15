@@ -45,6 +45,44 @@ def write_json_file(token, drive_id, file_path, data):
     response = requests.put(url, headers=headers, data=json.dumps(data, indent=2))
     response.raise_for_status()
 
+def ensure_folder_exists(token, drive_id, folder_path):
+    """Create folder_path (relative to drive root) if it does not already exist.
+
+    Walks each path component in order so nested paths are created correctly.
+    Raises RuntimeError if any component cannot be created.
+    """
+    auth_header = {"Authorization": f"Bearer {token}"}
+    json_headers = {**auth_header, "Content-Type": "application/json"}
+    parts = [p for p in folder_path.replace("\\", "/").split("/") if p]
+    current_path = ""
+
+    for part in parts:
+        parent_url = (
+            f"{GRAPH_BASE}/drives/{drive_id}/root/children"
+            if not current_path
+            else f"{GRAPH_BASE}/drives/{drive_id}/root:/{current_path}:/children"
+        )
+        current_path = f"{current_path}/{part}" if current_path else part
+
+        check = requests.get(
+            f"{GRAPH_BASE}/drives/{drive_id}/root:/{current_path}",
+            headers=auth_header,
+        )
+        if check.status_code == 200:
+            continue
+
+        resp = requests.post(
+            parent_url,
+            headers=json_headers,
+            json={"name": part, "folder": {}, "@microsoft.graph.conflictBehavior": "ignore"},
+        )
+        if resp.status_code not in (200, 201):
+            raise RuntimeError(
+                f"Could not create folder '{current_path}': "
+                f"{resp.status_code} {resp.text[:200]}"
+            )
+
+
 def append_to_log(token, drive_id, log_path, row_data):
     import openpyxl
     import io
@@ -65,7 +103,9 @@ def append_to_log(token, drive_id, log_path, row_data):
         wb = openpyxl.load_workbook(io.BytesIO(response.content))
         ws = wb.active
 
-    ws.append([datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")] + row_data)
+    ws.insert_rows(2)
+    for col_idx, value in enumerate([datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")] + row_data, start=1):
+        ws.cell(row=2, column=col_idx, value=value)
 
     buffer = io.BytesIO()
     wb.save(buffer)

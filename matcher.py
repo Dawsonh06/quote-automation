@@ -48,6 +48,8 @@ Analyze the attached PDF and return a JSON object with these fields:
 - Both must come from this exact list — do not invent new categories:
 {category_list}
 - total_price: Total dollar amount as a number if there is one clear lump sum total, null if there are only unit prices, multiple alternates, or the total is unclear
+- phone: Vendor phone number if visible on the document, null if not found
+- location: Vendor city and state if visible on the document (e.g. "Portland, OR"), null if not found
 - reasoning: One sentence explaining your match decision
 - is_quote: true if this PDF contains pricing/scope of work, false if it is a supporting document (insurance cert, spec sheet, reference letter, etc.)
 
