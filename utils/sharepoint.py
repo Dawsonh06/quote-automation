@@ -115,3 +115,49 @@ def append_to_log(token, drive_id, log_path, row_data):
 
     requests.put(url, headers={**headers_auth, "Content-Type": "application/octet-stream"},
                  data=buffer.read()).raise_for_status()
+
+
+def prune_old_log_entries(token, drive_id, log_path, days=30):
+    """Delete rows from the processing log older than `days`. Returns the number of rows removed."""
+    import openpyxl
+    import io
+    from datetime import datetime, timedelta
+
+    headers_auth = {"Authorization": f"Bearer {token}"}
+    url = f"{GRAPH_BASE}/drives/{drive_id}/root:/{log_path}:/content"
+    response = requests.get(url, headers=headers_auth)
+
+    if response.status_code == 404:
+        return 0
+    response.raise_for_status()
+
+    wb = openpyxl.load_workbook(io.BytesIO(response.content))
+    ws = wb.active
+
+    cutoff = datetime.now() - timedelta(days=days)
+    rows_to_delete = []
+    for row_idx in range(2, ws.max_row + 1):
+        timestamp_raw = ws.cell(row=row_idx, column=1).value
+        if not timestamp_raw:
+            continue
+        try:
+            timestamp = datetime.strptime(str(timestamp_raw).replace("PST", "").strip(), "%Y-%m-%d %H:%M")
+        except ValueError:
+            continue
+        if timestamp < cutoff:
+            rows_to_delete.append(row_idx)
+
+    if not rows_to_delete:
+        return 0
+
+    for row_idx in reversed(rows_to_delete):
+        ws.delete_rows(row_idx)
+
+    buffer = io.BytesIO()
+    wb.save(buffer)
+    buffer.seek(0)
+
+    requests.put(url, headers={**headers_auth, "Content-Type": "application/octet-stream"},
+                 data=buffer.read()).raise_for_status()
+
+    return len(rows_to_delete)

@@ -6,7 +6,7 @@ import base64
 
 from utils.graph_auth import get_access_token
 from utils.email_ops import get_unprocessed_emails, get_attachments, get_email_raw, mark_as_read, send_notification_email
-from utils.sharepoint import get_site_id, get_drive_id, upload_file, read_json_file, write_json_file, append_to_log, ensure_folder_exists
+from utils.sharepoint import get_site_id, get_drive_id, upload_file, read_json_file, write_json_file, append_to_log, ensure_folder_exists, prune_old_log_entries
 from bid_registry import load_active_bids, find_bid_folder, ensure_bid_folders_exist
 from bid_archiver import archive_expired_bids
 from classifier import classify_email
@@ -60,6 +60,10 @@ def main():
     print("\nChecking for expired bids to archive...")
     archive_expired_bids(token, drive_id, BIDS_BASE, BIDS_PAST_PATH)
     print()
+
+    print("Pruning processing log entries older than 30 days...")
+    pruned = prune_old_log_entries(token, drive_id, LOG_PATH, days=30)
+    print(f"  Removed {pruned} old log entries\n" if pruned else "  No old entries to remove\n")
 
     # Get unprocessed emails
     emails = get_unprocessed_emails(token, MAILBOX, processed_ids, folder_name=WATCH_FOLDER)
