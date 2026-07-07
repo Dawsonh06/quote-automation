@@ -15,7 +15,7 @@ def get_unprocessed_emails(token, mailbox, processed_ids, folder_name=None):
     response = requests.get(url, headers=headers)
     response.raise_for_status()
     messages = response.json().get("value", [])
-    return messages
+    return [m for m in messages if m["id"] not in processed_ids]
 
 def get_email_raw(token, mailbox, message_id):
     headers = {"Authorization": f"Bearer {token}"}

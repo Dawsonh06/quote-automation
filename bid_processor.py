@@ -55,7 +55,7 @@ def main():
         return
 
     print("\nEnsuring bid folders exist...")
-    ensure_bid_folders_exist(token, drive_id, BIDS_BASE, active_bids)
+    ensure_bid_folders_exist(token, drive_id, BIDS_BASE, active_bids, BIDS_PAST_PATH)
 
     print("\nChecking for expired bids to archive...")
     archive_expired_bids(token, drive_id, BIDS_BASE, BIDS_PAST_PATH)
@@ -143,7 +143,7 @@ def main():
                         confidence    = result.get("confidence", "low")
                         matched_bid   = _clean_matched_bid(result.get("matched_bid"))
                         vendor        = result.get("vendor", "Unknown Vendor")
-                        scope         = result.get("scope", "Unknown Scope")
+                        scope         = result.get("scope") or result.get("category_long", "Unknown Scope")
                         price         = result.get("total_price")
 
                         print(f"    Match: matched_bid={matched_bid!r}  confidence={confidence}")
@@ -221,7 +221,7 @@ def main():
                 log_row[10] = ""
                 print(f"  Skipped (classified as other)")
 
-            # mark_as_read(token, MAILBOX, email_id)  # disabled — read-only inbox mode
+            mark_as_read(token, MAILBOX, email_id)
 
             processed_ids[email_id] = {
                 "processed_at": datetime.utcnow().isoformat(),
@@ -245,7 +245,8 @@ def main():
                 "error": str(e)
             }
 
-    write_json_file(token, drive_id, PROCESSED_IDS_PATH, processed_ids)
+        write_json_file(token, drive_id, PROCESSED_IDS_PATH, processed_ids)
+
     print(f"\nDone. Processed {len(emails)} emails.")
 
     if errors:

@@ -39,9 +39,9 @@ Active bids MJ Hughes is currently pursuing:
 Analyze the attached PDF and return a JSON object with these fields:
 
 - matched_bid: The exact job name string (only the part in quotes) from the list above that this quote is for, or null if you can't determine it
-- confidence: "high" (document clearly references this project by name, owner, or unique identifier),
-              "medium" (likely match based on location/scope but not explicitly named),
-              "low" (can't confidently match to any active bid)
+- confidence: "high" (document references this project by name, owner, project/contract number, or 2+ matching keywords),
+              "medium" (some overlap with a bid's name/keywords/location/scope, but not a clean match),
+              "low" (nothing in the document points to any active bid)
 - vendor: Company name submitting the quote
 - category_long: The full category name from this list that best describes what this vendor is quoting
 - category_short: The corresponding short code for that category
@@ -60,10 +60,22 @@ Rules:
   Always check these fields first before looking elsewhere in the document.
 - After finding the project name in the document, compare it against the active bid list
   using both the project name AND the keywords. A match on either is sufficient.
-- Only return "high" confidence if the document contains the project name, owner name,
-  contract number, or a keyword that uniquely identifies one of the active bids.
-- If the project name on the document partially matches a bid (e.g. "Spanish Creek Bridge"
-  matching "Spanish Creek Box Girder Bridge"), treat that as high confidence.
+- Bid registry job names are often shortened, reordered, or phrased differently than the
+  vendor's own document title (extra words like "Project", a project/bid number, a city name,
+  or an owner's name added or dropped do NOT prevent a match). Match on the core distinguishing
+  words and place names, not on exact phrasing. Do not require an exact or near-exact string match.
+- Default to "high" confidence whenever the document's project name shares 2 or more significant
+  words with an active bid's job name (or one of its keywords), even if extra words, a project
+  number, or different word order are present. Example: a document titled "Westbrook Reservoirs
+  Improvements Project #23873" IS a high-confidence match against an active bid named "Westbrook
+  Reservoirs Improvements" or "Nob Hill Water — Westbrook Reservoirs" — the shared "Westbrook
+  Reservoirs" is enough; the project number is not a mismatch.
+- Use "medium" for weaker signals: matching location/owner/scope but no shared project-name words,
+  or a single shared keyword.
+- Only use "low" when you truly cannot connect the document to any bid on the list at all.
+- When in doubt between two confidence levels, or between guessing a bid and returning null,
+  prefer the higher confidence / the guess — a human reviews every "quote" either way, and a
+  wrong guess is far cheaper than an obvious match getting dropped into the unmatched pile.
 - If total_price is ambiguous, return null - do not guess.
 - If no active bids match, return matched_bid as null and confidence as "low".
 - Supporting documents (insurance certs, W9s, spec sheets) should have is_quote set to false.
@@ -119,9 +131,9 @@ Active bids MJ Hughes is currently pursuing:
 Analyze this email and return a JSON object with these fields:
 
 - matched_bid: The exact job name string (only the part in quotes) from the list above that this quote is for, or null if you can't determine it
-- confidence: "high" (email clearly references this project by name, owner, or unique identifier),
-              "medium" (likely match based on location/scope but not explicitly named),
-              "low" (can't confidently match to any active bid)
+- confidence: "high" (email references this project by name, owner, project/contract number, or 2+ matching keywords),
+              "medium" (some overlap with a bid's name/keywords/location/scope, but not a clean match),
+              "low" (nothing in the email points to any active bid)
 - vendor: Company name submitting the quote
 - scope: 3-6 word description of what they are quoting (e.g. "Concrete pumping services")
 - total_price: Total dollar amount as a number if there is one clear lump sum, null otherwise
@@ -135,7 +147,19 @@ Body:
 {body[:3000]}
 
 Rules:
-- Only return "high" confidence if the email contains the project name, owner name, or a keyword that uniquely identifies one of the active bids
+- Bid registry job names are often shortened, reordered, or phrased differently than how the
+  sender refers to the project (extra words, a bid number, a city name, or an owner's name added
+  or dropped do NOT prevent a match). Match on the core distinguishing words and place names, not
+  on exact phrasing. Do not require an exact or near-exact string match.
+- Default to "high" confidence whenever the email's subject or body shares 2 or more significant
+  words with an active bid's job name (or one of its keywords), even with extra words or different
+  word order present.
+- Use "medium" for weaker signals: matching location/owner/scope but no shared project-name words,
+  or a single shared keyword.
+- Only use "low" when you truly cannot connect the email to any bid on the list at all.
+- When in doubt between two confidence levels, or between guessing a bid and returning null,
+  prefer the higher confidence / the guess — a human reviews every "quote" either way, and a
+  wrong guess is far cheaper than an obvious match getting dropped into the unmatched pile.
 - If no active bids match, return matched_bid as null and confidence as "low"
 
 Respond with JSON only, no other text."""
