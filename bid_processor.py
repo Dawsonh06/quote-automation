@@ -121,7 +121,7 @@ def main():
 
                     print(f"  Match: matched_bid={matched_bid!r}  confidence={confidence}")
                     if confidence in ("high", "medium") and matched_bid:
-                        folder_path = find_bid_folder(token, drive_id, BIDS_BASE, matched_bid)
+                        folder_path = find_bid_folder(token, drive_id, BIDS_BASE, matched_bid, BIDS_PAST_PATH)
                         if not folder_path:
                             print(f"  WARNING: No folder found for '{matched_bid}', sending to review")
                             folder_path = REVIEW_FOLDER
@@ -154,7 +154,7 @@ def main():
                         if not is_quote:
                             # Supporting document — file alongside quote but don't rename
                             if confidence in ("high", "medium") and matched_bid:
-                                folder_path = find_bid_folder(token, drive_id, BIDS_BASE, matched_bid)
+                                folder_path = find_bid_folder(token, drive_id, BIDS_BASE, matched_bid, BIDS_PAST_PATH)
                                 if not folder_path:
                                     folder_path = REVIEW_FOLDER
                             else:
@@ -170,7 +170,7 @@ def main():
                                 original_name
                             )
                             if confidence in ("high", "medium") and matched_bid:
-                                folder_path = find_bid_folder(token, drive_id, BIDS_BASE, matched_bid)
+                                folder_path = find_bid_folder(token, drive_id, BIDS_BASE, matched_bid, BIDS_PAST_PATH)
                                 if not folder_path:
                                     print(f"    WARNING: No folder found for '{matched_bid}', sending to review")
                                     folder_path = REVIEW_FOLDER

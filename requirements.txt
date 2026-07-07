@@ -3,3 +3,4 @@ msal
 requests
 openpyxl
 python-dotenv
+tzdata
