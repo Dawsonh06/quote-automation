@@ -12,9 +12,18 @@ def get_unprocessed_emails(token, mailbox, processed_ids, folder_name=None):
     else:
         url = f"{GRAPH_BASE}/users/{mailbox}/messages?$top=50&$filter=isRead eq false&$orderby=receivedDateTime desc"
 
-    response = requests.get(url, headers=headers)
-    response.raise_for_status()
-    messages = response.json().get("value", [])
+    # Page through the full result set. Emails that get manually moved into the
+    # folder keep their original receivedDateTime, so with $orderby=receivedDateTime
+    # desc an old manually-moved email can be older than the 50 newest unread items
+    # and would otherwise never appear if we stopped at the first page.
+    messages = []
+    while url:
+        response = requests.get(url, headers=headers)
+        response.raise_for_status()
+        payload = response.json()
+        messages.extend(payload.get("value", []))
+        url = payload.get("@odata.nextLink")
+
     return [m for m in messages if m["id"] not in processed_ids]
 
 def get_email_raw(token, mailbox, message_id):
