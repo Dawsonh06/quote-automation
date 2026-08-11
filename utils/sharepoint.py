@@ -1,8 +1,24 @@
 import requests
 import json
 import os
+from urllib.parse import quote
 
 GRAPH_BASE = "https://graph.microsoft.com/v1.0"
+
+
+def _encode_drive_path(path):
+    """Percent-encode each segment of a drive-relative path for Graph's
+    path-based addressing (root:/path:/...).
+
+    '#', '%', and '?' are legal filename characters on SharePoint but are
+    URL-special: '#' starts a fragment, '?' starts a query string, and if
+    left raw, requests/urllib silently drop everything after them before
+    the request is ever sent. That truncates the ':/content' suffix Graph
+    needs and produces a 400 Bad Request that only shows up for filenames
+    containing these characters.
+    """
+    path = path.replace("\\", "/")
+    return "/".join(quote(part, safe="") for part in path.split("/") if part)
 
 def get_site_id(token, sharepoint_site):
     headers = {"Authorization": f"Bearer {token}"}
@@ -25,14 +41,14 @@ def get_drive_id(token, site_id):
 def upload_file(token, drive_id, folder_path, filename, file_bytes):
     headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/octet-stream"}
     path = f"{folder_path}/{filename}".replace("//", "/")
-    url = f"{GRAPH_BASE}/drives/{drive_id}/root:/{path}:/content"
+    url = f"{GRAPH_BASE}/drives/{drive_id}/root:/{_encode_drive_path(path)}:/content"
     response = requests.put(url, headers=headers, data=file_bytes)
     response.raise_for_status()
     return response.json().get("webUrl")
 
 def read_json_file(token, drive_id, file_path):
     headers = {"Authorization": f"Bearer {token}"}
-    url = f"{GRAPH_BASE}/drives/{drive_id}/root:/{file_path}:/content"
+    url = f"{GRAPH_BASE}/drives/{drive_id}/root:/{_encode_drive_path(file_path)}:/content"
     response = requests.get(url, headers=headers)
     if response.status_code == 404:
         return {}
@@ -41,7 +57,7 @@ def read_json_file(token, drive_id, file_path):
 
 def write_json_file(token, drive_id, file_path, data):
     headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
-    url = f"{GRAPH_BASE}/drives/{drive_id}/root:/{file_path}:/content"
+    url = f"{GRAPH_BASE}/drives/{drive_id}/root:/{_encode_drive_path(file_path)}:/content"
     response = requests.put(url, headers=headers, data=json.dumps(data, indent=2))
     response.raise_for_status()
 
@@ -60,12 +76,12 @@ def ensure_folder_exists(token, drive_id, folder_path):
         parent_url = (
             f"{GRAPH_BASE}/drives/{drive_id}/root/children"
             if not current_path
-            else f"{GRAPH_BASE}/drives/{drive_id}/root:/{current_path}:/children"
+            else f"{GRAPH_BASE}/drives/{drive_id}/root:/{_encode_drive_path(current_path)}:/children"
         )
         current_path = f"{current_path}/{part}" if current_path else part
 
         check = requests.get(
-            f"{GRAPH_BASE}/drives/{drive_id}/root:/{current_path}",
+            f"{GRAPH_BASE}/drives/{drive_id}/root:/{_encode_drive_path(current_path)}",
             headers=auth_header,
         )
         if check.status_code == 200:
@@ -89,7 +105,7 @@ def append_to_log(token, drive_id, log_path, row_data):
     from datetime import datetime
 
     headers_auth = {"Authorization": f"Bearer {token}"}
-    url = f"{GRAPH_BASE}/drives/{drive_id}/root:/{log_path}:/content"
+    url = f"{GRAPH_BASE}/drives/{drive_id}/root:/{_encode_drive_path(log_path)}:/content"
     response = requests.get(url, headers=headers_auth)
 
     if response.status_code == 404:
@@ -124,7 +140,7 @@ def prune_old_log_entries(token, drive_id, log_path, days=30):
     from datetime import datetime, timedelta
 
     headers_auth = {"Authorization": f"Bearer {token}"}
-    url = f"{GRAPH_BASE}/drives/{drive_id}/root:/{log_path}:/content"
+    url = f"{GRAPH_BASE}/drives/{drive_id}/root:/{_encode_drive_path(log_path)}:/content"
     response = requests.get(url, headers=headers_auth)
 
     if response.status_code == 404:
