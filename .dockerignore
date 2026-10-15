@@ -1,0 +1,16 @@
+.env
+*.env
+.git
+.gitignore
+.dockerignore
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.log
+release.zip
+processed_email_ids.json
+CLAUDE.md
+deploy.bat
+debug_*.py
+remove_from_processed.py
